@@ -162,6 +162,15 @@ app.post('/api/jobs/demo', (req, res) => {
   }
 });
 
+// Serve static frontend assets in production
+const frontendDist = path.join(__dirname, '../frontend/dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
+
 // Start listening
 app.listen(PORT, () => {
   console.log(`LogLens Express Server is running on port ${PORT}`);
