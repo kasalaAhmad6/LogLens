@@ -1,0 +1,50 @@
+[
+  {
+    "id": "sql_injection",
+    "name": "SQL Injection",
+    "severity": "high",
+    "patterns": [
+      "union\\s+select",
+      "select\\s+.*\\s+from",
+      "insert\\s+into",
+      "delete\\s+from",
+      "drop\\s+table",
+      "'\\s*or\\s+1\\s*=\\s*1",
+      "\"\\s*or\\s+1\\s*=\\s*1",
+      "admin'\\s*--",
+      "admin\"\\s*--",
+      "or\\s+\\d+=\\d+"
+    ],
+    "description": "Attempts to inject SQL commands into request URLs or parameters."
+  },
+  {
+    "id": "xss",
+    "name": "Cross-Site Scripting (XSS)",
+    "severity": "high",
+    "patterns": [
+      "<script.*?>",
+      "javascript:",
+      "onerror\\s*=",
+      "onload\\s*=",
+      "alert\\(",
+      "document\\.cookie",
+      "eval\\(",
+      "srcdoc\\s*="
+    ],
+    "description": "Attempts to inject executable scripts into client-side browser windows."
+  },
+  {
+    "id": "directory_traversal",
+    "name": "Directory Traversal",
+    "severity": "high",
+    "patterns": [
+      "\\.\\./",
+      "\\.\\.\\\\",
+      "/etc/passwd",
+      "/etc/shadow",
+      "/boot\\.ini",
+      "win\\.ini"
+    ],
+    "description": "Attempts to traverse server file systems to access unauthorized system files."
+  }
+]

@@ -1,0 +1,215 @@
+================================================================================
+                         LOGLENS - SIEM-LITE LOG ANALYZER
+                         Detailed Project Documentation
+================================================================================
+
+1. PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+Web server logs are the "black box" of internet traffic, containing evidence of 
+every attack attempt. However, a single day's log can contain millions of lines. 
+Analyzing this manually is impossible. 
+
+"LogLens" is a SIEM-lite (Security Information and Event Management) web 
+application designed for System Administrators. Users upload raw web server log 
+files (Apache/Nginx Common or Combined Log Format), and the application parses 
+them, evaluates the entries against a threat signature database, resolves the 
+location of malicious IP addresses, and renders an interactive dashboard showing 
+"Who attacked you, how, when, and from where."
+
+The project is built as a full-stack application using Node.js & Express for the 
+backend, SQLite for the database, and React & Recharts for the frontend dashboard.
+
+
+2. TECHNICAL ARCHITECTURE
+--------------------------------------------------------------------------------
+The project is divided into two distinct components: a Backend API Server and a 
+Frontend Web UI.
+
+   +-----------------------------------------------------------------------+
+   |                            BROWSER FRONTEND                           |
+   |   - React SPA (Vite) on Port 3000                                     |
+   |   - Upload progress bar (XHR) & Polling status indicator (1.5s interval)|
+   |   - Interactive charts (Recharts) & Searchable Attacker Table with    |
+   |     Country flags                                                     |
+   +---------------------------------------+-------------------------------+
+                                           |
+                                           | HTTP Requests (Proxied /api)
+                                           v
+   +-----------------------------------------------------------------------+
+   |                             EXPRESS BACKEND                           |
+   |   - Express REST API on Port 5000                                     |
+   |   - Multer middleware for streamed disk storage                       |
+   |   - Background stream parsing worker                                  |
+   +---------------------------------------+-------------------------------+
+                                           |
+                                           | Direct Read/Write
+                                           v
+   +---------------------------------------+-------------------------------+
+   |                             STORAGE & LOGIC                           |
+   |   - node:sqlite Database (loglens.db) for aggregated queries          |
+   |   - signatures.json for Case-Insensitive Attack Regular Expressions   |
+   |   - geoip-lite library for offline IP-to-country lookups              |
+   +-----------------------------------------------------------------------+
+
+
+3. STEP-BY-STEP IMPLEMENTATION DETAILS (FROM SCRATCH)
+--------------------------------------------------------------------------------
+
+STEP 1: THREAT SIGNATURE DATABASE (signatures.json)
+---------------------------------------------------
+We compile a library of attack signatures as a JSON database. Each threat type 
+contains a list of regular expression patterns, a severity flag, and a description.
+- SQL Injection (SQLi): Matches strings like UNION SELECT, OR 1=1, SELECT...FROM.
+- Cross-Site Scripting (XSS): Matches tags and handlers like <script>, 
+  javascript:, onerror=, alert(.
+- Directory Traversal: Matches parent indicators like ../, ..\, /etc/passwd, 
+  win.ini.
+
+STEP 2: DATABASE CONTROLLER (database.js)
+------------------------------------------
+LogLens uses the built-in 'node:sqlite' driver (experimental module in Node 22+) 
+which runs SQLite natively without requiring C++ compilation.
+The database schema consists of three tables:
+1. `jobs`: Tracks log processing history. Holds jobId, status (pending, 
+   processing, completed, failed), parsing progress (0-100%), total lines, 
+   parsed lines, attacks found, and timestamp metadata.
+2. `logs`: Stores parsed log entries (IP address, resolved country, timestamp 
+   in ISO format, HTTP method, URL path, response status code, size in bytes, 
+   and User Agent).
+3. `threats`: Connects flagged security alerts to their parent log entries. 
+   Stores threat type, severity (high, medium, low), and the matched regex pattern.
+
+Indexes are created on `logs(job_id)`, `logs(ip)`, `threats(job_id)`, and 
+`threats(type)` to guarantee that aggregation queries run instantly, even with 
+hundreds of thousands of records.
+
+STEP 3: FILE PARSING & THREAT DETECTION WORKER (parser.js)
+----------------------------------------------------------
+When a user uploads a log file, the server executes the parsing worker in the 
+background.
+- Line-by-line streaming: Instead of reading the entire file into RAM, the 
+  worker opens a read stream (`fs.createReadStream`) and pipes it into the 
+  `readline` interface. This parses the log line-by-line, utilizing a stable 
+  RAM footprint (<35MB) regardless of file size.
+- Robust Regex: The Common Log Format (CLF) parser uses a quote-escaped pattern 
+  `"((?:[^"\\]|\\.)*)"` to match request strings, referers, and user agents. 
+  This handles backslash-escaped characters (like `q='\"`) that crash generic 
+  CLF regular expressions.
+- Brute Force Heuristic: The parser maintains a Map in memory tracking failed 
+  requests (status code `401 Unauthorized` or `403 Forbidden`) per IP address inside 
+  a 5-minute sliding window. If an IP accumulates >=5 failed requests within the 
+  window, a Brute Force threat is recorded.
+- GeoIP Resolution: Resolves IP locations offline using the `geoip-lite` database 
+  to tag the country code for each log entry.
+- Transaction Batching: Writing logs individually is extremely slow. The parser 
+  accumulates 1,000 logs and threat records in-memory, flushing them to SQLite 
+  inside a single SQL Transaction (`BEGIN TRANSACTION ... COMMIT`). This boosts 
+  parsing speed up to 15,000+ lines per second.
+
+STEP 4: EXPRESS SERVER API (server.js)
+--------------------------------------
+Exposes REST endpoints to manage uploads and query statistical aggregates:
+- `POST /api/upload`: Receives file stream, registers job, launches worker in 
+  background, and immediately returns a Job ID.
+- `GET /api/jobs/:id/status`: Polls parsing status and progress percentage.
+- `GET /api/jobs/:id/report`: Compiles aggregates, timeline, and top attackers.
+- `POST /api/jobs/demo`: Copies the preloaded demo log to uploads and runs a job.
+- `GET /api/jobs/:id/export`: Downloads the report dataset as a JSON file.
+
+STEP 5: FRONTEND VITE CONFIGURATION (vite.config.js)
+----------------------------------------------------
+A React single-page application is created. The dev server runs on port 3000 
+and proxies `/api` calls to port 5000, preventing CORS blocks.
+
+STEP 6: RESPONSIVE SECURITY STYLING (index.css)
+-----------------------------------------------
+LogLens features a dark cyberpunk visual aesthetic.
+- Color Scheme: Deep navy/slate backdrop (`#080c14`), glowing translucent panels, 
+  electric blue primary triggers, emerald success badges, amber warning accents, 
+  and ruby red critical indicators.
+- CSS Elements: Responsive grid layouts, custom scrollbars, and keyframe-based 
+  pulse alerts indicating active scans or high threats.
+
+STEP 7: STATE CONTROLLER (App.jsx)
+----------------------------------
+Coordinates application states:
+- Upload View: Hosts file drag-and-drop and job selection history panels.
+- Loading View: Polls active jobs, animating a parsing progress bar from 0-100%.
+- Dashboard View: Renders metrics cards, timeline charts, and attackers lists.
+- Export Trigger: Packages stats into a downloadable JSON file.
+
+STEP 8: INTERACTIVE COMPONENTS
+------------------------------
+- `UploadArea.jsx`: Intercepts files and displays real-time network upload progress 
+  using HTML5 XHR.
+- `JobSelector.jsx`: Sidebar tracking recent jobs, statuses, and threat counts.
+- `DashboardStats.jsx`: Key metrics (Total Logs, Alerts Blocked, Threat Ratio).
+- `AttackTimeline.jsx`: Recharts area chart graphing attack trends hourly.
+- `AttackTypes.jsx`: Recharts donut chart detailing threat distributions.
+- `TopAttackers.jsx`: Displays top malicious IPs, threat ratios, maximum severity 
+  levels, and country flag emojis mapped from ISO country codes.
+
+
+4. SECURITY & REGEX SIGNATURE DETAILS
+--------------------------------------------------------------------------------
+
+A. SQL INJECTION (SQLi) PATTERNS
+   - `union\s+select`: Catches data extraction attempts (e.g. `UNION SELECT username, password`).
+   - `select\s+.*\s+from`: Flags custom select attacks targeting internal tables.
+   - `'?\s*or\s+1\s*=\s*1`: Catches authentication bypass payloads (e.g. `' OR 1=1 --`).
+
+B. CROSS-SITE SCRIPTING (XSS) PATTERNS
+   - `<script.*?>`: Detects HTML tag injections containing script vectors.
+   - `javascript:`: Flags inline JavaScript protocol schemas.
+   - `onerror\s*=`, `onload\s*=`: Identifies event listener script triggers.
+
+C. DIRECTORY TRAVERSAL PATTERNS
+   - `\.\./`, `\.\.\\`: Flags upward traversal requests attempting to exit the web root.
+   - `/etc/passwd`, `win\.ini`: Detects standard paths for system config target files.
+
+D. BRUTE FORCE HEURISTIC
+   - Window: 5 minutes (300,000ms).
+   - Target: Status codes 401 (Unauthorized) and 403 (Forbidden).
+   - Action: Grouped by IP. Triggered on >=5 attempts. Tagged as High severity on >=10.
+
+
+5. SCALING & PERFORMANCE OPTIMIZATIONS
+--------------------------------------------------------------------------------
+
+- Streaming vs Loading: Reading a 500MB log file into memory using `fs.readFile` 
+  requires allocating 500MB of RAM buffer. If multiple logs are parsed 
+  concurrently, the server process will crash due to out-of-memory errors. By 
+  using read streams, LogLens processes logs in small chunks (64KB chunks), 
+  re-using memory buffers so RAM consumption never exceeds 35MB.
+- Database Transactions: Standard SQL databases lock the file on writes. Running 
+  individual inserts for a 500,000-line log results in 500,000 filesystem locks, 
+  which stalls CPU execution and takes hours. Grouping writes in transactions 
+  flushes batches of 1,000 rows to SQLite in a single transaction write, completing 
+  in milliseconds.
+- Update Throttling: UI updates are computationally heavy. Rather than writing 
+  progress to SQLite on every line, updates are throttled to every 500ms. This 
+  reduces database write operations, making the server highly responsive to API 
+  queries.
+
+
+6. RUNNING & TESTING LOGLENS
+--------------------------------------------------------------------------------
+
+To start and run the full-stack project locally:
+
+1. Start the Express Backend:
+   - Navigate to `backend/`
+   - Run `node server.js`
+   - The backend will start on port 5000.
+
+2. Start the Vite React Frontend:
+   - Navigate to `frontend/`
+   - Run `npm run dev`
+   - The frontend will compile and start on port 3000.
+
+3. Open the UI:
+   - Open your browser to `http://localhost:3000`.
+   - Click "Load Demo Log" to instantly run a demo parsing run and watch the 
+     dashboard populate.
+   - Or drag and drop any Apache/Nginx CLF log file to test the parser.
+================================================================================

@@ -1,0 +1,17 @@
+{
+  "name": "loglens-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LogLens SIEM-lite parser and detection backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "geoip-lite": "^1.4.10",
+    "multer": "^1.4.5-lts.1"
+  }
+}
